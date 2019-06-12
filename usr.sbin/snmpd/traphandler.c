@@ -134,6 +134,7 @@ traphandler_bind(struct address *addr)
 
 	return (s);
  bad:
+	pprintf(__func__, "close %d\n", s);
 	close (s);
 	return (-1);
 }
@@ -145,6 +146,7 @@ traphandler_shutdown(void)
 
 	TAILQ_FOREACH(so, &snmpd_env->sc_sockets, entry) {
 		event_del(&so->s_ev);
+		pprintf(__func__, "close %d\n", so->s_fd);
 		close(so->s_fd);
 	}
 }
@@ -163,6 +165,7 @@ traphandler_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 int
 snmpd_dispatch_traphandler(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
+	pprintf(__func__, "\n");
 	switch (imsg->hdr.type) {
 	case IMSG_ALERT:
 		return (traphandler_priv_recvmsg(p, imsg));
@@ -176,6 +179,8 @@ snmpd_dispatch_traphandler(int fd, struct privsep_proc *p, struct imsg *imsg)
 void
 traphandler_recvmsg(int fd, short events, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", fd, event, arg);
+
 	struct privsep		*ps = arg;
 	char			 buf[8196];
 	struct iovec		 iov[2];
@@ -276,14 +281,17 @@ traphandler_v1translate(struct ber_oid *oid, u_int gtype, u_int etype)
 int
 traphandler_priv_recvmsg(struct privsep_proc *p, struct imsg *imsg)
 {
+	pprintf(__func__, "\n");
 	ssize_t			 n;
 	pid_t			 pid;
 
 	if ((n = IMSG_DATA_SIZE(imsg)) <= 0)
 		return (-1);			/* XXX */
 
+		pprintf(__func__, "fork()\n");
 	switch ((pid = fork())) {
 	case 0:
+		pprintf(__func__, "fork()ed ???\n");
 		traphandler_fork_handler(p, imsg);
 		/* NOTREACHED */
 	case -1:
@@ -299,6 +307,7 @@ traphandler_priv_recvmsg(struct privsep_proc *p, struct imsg *imsg)
 int
 traphandler_fork_handler(struct privsep_proc *p, struct imsg *imsg)
 {
+	pprintf(__func__, "\n");
 	struct privsep		*ps = p->p_ps;
 	struct snmpd		*env = ps->ps_env;
 	char			 oidbuf[SNMP_MAX_OID_STRLEN];
@@ -345,10 +354,14 @@ traphandler_fork_handler(struct privsep_proc *p, struct imsg *imsg)
 	exit(0);
 }
 
+/**
+ * snmpd.conf の trap receiver <ip> の数だけ呼ばれる
+ */
 void
 trapcmd_exec(struct trapcmd *cmd, struct sockaddr *sa,
     struct ber_element *iter, char *trapoid, u_int uptime)
 {
+	pprintf(__func__, "\n");
 	char			 oidbuf[SNMP_MAX_OID_STRLEN];
 	struct ber_oid		 oid;
 	struct ber_element	*elm;
@@ -361,12 +374,18 @@ trapcmd_exec(struct trapcmd *cmd, struct sockaddr *sa,
 		    smi_oid2string(cmd->cmd_oid, oidbuf, sizeof(oidbuf), 0));
 		return;
 	}
+	pprintf(__func__, "socketpair() at fd %d %d\n", s[0], s[1]);
+	systemf("fstat -p %jd | grep -e '%d\\* unix' -e '%d\\* unix'", (intmax_t)getpid(), s[0], s[1]);
 
+	pprintf(__func__, "fork()\n");
 	switch (child = fork()) {
 	case 0:
+		pprintf(__func__, "fork()ed xxx\n");
 		dup2(s[1], STDIN_FILENO);
 
+		pprintf(__func__, "close %d\n", s[0]);
 		close(s[0]);
+		pprintf(__func__, "close %d\n", s[1]);
 		close(s[1]);
 
 		closefrom(STDERR_FILENO + 1);
@@ -383,11 +402,14 @@ trapcmd_exec(struct trapcmd *cmd, struct sockaddr *sa,
 	case -1:
 		log_warn("could not fork trap command for OID '%s'",
 		    smi_oid2string(cmd->cmd_oid, oidbuf, sizeof(oidbuf), 0));
+		pprintf(__func__, "close %d\n", s[0]);
 		close(s[0]);
+		pprintf(__func__, "close %d\n", s[1]);
 		close(s[1]);
 		return;
 	}
 
+	pprintf(__func__, "close %d\n", s[1]);
 	close(s[1]);
 
 	host = traphandler_hostname(sa, 0);
@@ -420,6 +442,7 @@ trapcmd_exec(struct trapcmd *cmd, struct sockaddr *sa,
 			goto out;
 	}
  out:
+	pprintf(__func__, "close %d\n", s[0]);
 	close(s[0]);
 	waitpid(child, &status, 0);
 
@@ -432,6 +455,8 @@ trapcmd_exec(struct trapcmd *cmd, struct sockaddr *sa,
 	} else {
 		log_debug("child %i finished", child);
 	}
+	pprintf(__func__, "close %d\n", s[1]);
+	// TODO: indent
 		close(s[1]);
 
 	return;

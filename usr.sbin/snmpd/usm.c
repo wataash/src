@@ -628,6 +628,7 @@ usm_crypt(struct snmp_message *msg, u_char *inbuf, int inlen, u_char *outbuf,
 	int do_encrypt)
 {
 	const EVP_CIPHER	*cipher;
+	// TODO: opaque in OpenSSL 1.1
 	EVP_CIPHER_CTX		 ctx;
 	u_char			*privkey;
 	int			 i;

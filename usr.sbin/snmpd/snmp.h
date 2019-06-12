@@ -26,7 +26,13 @@
  * SNMP IMSG interface
  */
 
+// should be restrict?
+void systemf(const char *format, ...) __attribute__((__format__ (printf, 1, 2)));
+void pprintf(const char *func, const char *format, ...) __attribute__((__format__ (printf, 2, 3)));
+void event_logging_cb(int severity, const char *msg);
+
 #define SNMP_MAX_OID_STRLEN	128	/* max size of the OID _string_ */
+// not used
 #define SNMP_SOCKET		"/var/run/snmpd.sock"
 #define AGENTX_SOCKET		"/var/run/agentx.sock"
 #define SNMP_RESTRICTED_SOCKET	"/var/run/snmpd.rsock"
@@ -326,6 +332,7 @@ struct agentx_getbulk_repeaters {
 
 struct agentx_pdu {
 	uint8_t		*buffer;
+	// ptr to data head?
 	uint8_t		*ptr;
 	uint8_t		*ioptr;
 	size_t		 buflen;

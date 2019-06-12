@@ -19,6 +19,8 @@
 #ifndef SNMPD_MIB_H
 #define SNMPD_MIB_H
 
+/// OIDIDX_* OIDIDX_*Entry: see mib_sysor()
+
 /*
  * Adding new MIBs:
  * - add the OID definitions below
@@ -731,11 +733,13 @@
 #define MIB_carpGroupName		MIB_carpGroupEntry, 2
 #define MIB_carpGroupDemote		MIB_carpGroupEntry, 3
 #define MIB_localSystem			MIB_openBSD, 23
+// MIB_SYSOID_DEFAULT: TODO: remove
 #define MIB_SYSOID_DEFAULT		MIB_openBSD, 23, 1
 #define MIB_localTest			MIB_openBSD, 42
 
 #define MIB_TREE			{		\
 	{ MIBDECL(iso) },				\
+/* MIB_TREE: see README.md */ \
 	{ MIBDECL(org) },				\
 	{ MIBDECL(dod) },				\
 	{ MIBDECL(internet) },				\

@@ -69,6 +69,7 @@ control_init(struct privsep *ps, struct control_sock *cs)
 	if (strlcpy(sun.sun_path, cs->cs_name,
 	    sizeof(sun.sun_path)) >= sizeof(sun.sun_path)) {
 		log_warn("%s: %s name too long", __func__, cs->cs_name);
+		pprintf(__func__, "close %d\n", fd);
 		close(fd);
 		return (-1);
 	}
@@ -76,28 +77,35 @@ control_init(struct privsep *ps, struct control_sock *cs)
 	if (unlink(cs->cs_name) == -1)
 		if (errno != ENOENT) {
 			log_warn("%s: unlink %s", __func__, cs->cs_name);
+			pprintf(__func__, "close %d\n", fd);
 			close(fd);
 			return (-1);
 		}
 
+	// more simply, how about umask(0) ?
 	if (cs->cs_restricted || cs->cs_agentx) {
 		old_umask = umask(S_IXUSR|S_IXGRP|S_IXOTH);
+		// rw-rw-rw- 666
 		mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH;
 	} else {
 		old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
+		// rw-rw---- 600
 		mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP;
 	}
 
 	if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1) {
 		log_warn("%s: bind: %s", __func__, cs->cs_name);
+		pprintf(__func__, "close %d\n", fd);
 		close(fd);
 		(void)umask(old_umask);
 		return (-1);
 	}
 	(void)umask(old_umask);
 
+	// why?
 	if (chmod(cs->cs_name, mode) == -1) {
 		log_warn("%s: chmod", __func__);
+		pprintf(__func__, "close %d\n", fd);
 		close(fd);
 		(void)unlink(cs->cs_name);
 		return (-1);
@@ -132,6 +140,7 @@ control_listen(struct control_sock *cs)
 void
 control_accept(int listenfd, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", listenfd, event, arg);
 	struct control_sock	*cs = arg;
 	int			 connfd;
 	socklen_t		 len;
@@ -161,6 +170,7 @@ control_accept(int listenfd, short event, void *arg)
 	}
 
 	if ((c = calloc(1, sizeof(struct ctl_conn))) == NULL) {
+		pprintf(__func__, "close %d\n", connfd);
 		close(connfd);
 		log_warn("%s: calloc", __func__);
 		return;
@@ -205,6 +215,7 @@ control_close(struct ctl_conn *c, const char *msg, struct imsg *imsg)
 	TAILQ_REMOVE(&ctl_conns, c, entry);
 
 	event_del(&c->iev.ev);
+	pprintf(__func__, "close %d\n", c->iev.ibuf.fd);
 	close(c->iev.ibuf.fd);
 
 	/* Some file descriptors are available again. */
@@ -220,6 +231,7 @@ control_close(struct ctl_conn *c, const char *msg, struct imsg *imsg)
 void
 control_dispatch_imsg(int fd, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", fd, event, arg);
 	struct ctl_conn		*c = arg;
 	struct control_sock	*cs = c->cs;
 	struct snmpd		*env = cs->cs_env;
@@ -268,6 +280,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 
 		switch (imsg.hdr.type) {
 		case IMSG_CTL_NOTIFY:
+			// data size should be zero
 			if (IMSG_DATA_SIZE(&imsg))
 				return control_close(c, "invalid size", &imsg);
 
@@ -363,6 +376,7 @@ purge_registered_oids(struct oidlist *oids)
 void
 control_dispatch_agentx(int fd, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", fd, event, arg);
 	struct ctl_conn			*c = arg;
 	struct agentx_handle		*h = c->handle;
 	struct agentx_pdu		*pdu;

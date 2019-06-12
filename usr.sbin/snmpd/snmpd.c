@@ -42,6 +42,78 @@
 
 __dead void	 usage(void);
 
+void
+systemf(const char *format, ...)
+{
+	char buf[100];
+	va_list ap;
+
+	va_start(ap, format);
+	int len = vsnprintf(buf, sizeof(buf), format, ap);
+	(void)len; // XXX: len vs sizeof(buf) not checked
+	va_end(ap);
+
+	printf("system %s\n", buf);
+
+	int err_ = system(buf);
+	err_ = 0;
+	(void)err_;
+}
+
+// pprintf(__func__, "%s %s\n", "foo", "bar")
+// to be
+// pprintf(__func__, "%s %s\n", "foo", "bar");
+void
+pprintf(const char *func, const char *format, ...)
+{
+	char new_fmt[1024];
+	va_list ap;
+
+	// ">>> 01234, main()"
+	int len = snprintf(
+	    new_fmt, sizeof(new_fmt), ">>> %05d, %s() ", getpid(), func);
+	(void)len; // XXX: len vs sizeof(new_fmt) not checked
+
+	// ">>> 01234, main()" + "%s %s\n"
+	len = strlcat(new_fmt, format, sizeof(new_fmt));
+	(void)len; // XXX: len vs sizeof(new_fmt) not checked
+
+	va_start(ap, format);
+	vprintf(new_fmt, ap);
+	va_end(ap);
+
+	len = 0; // breakpoint
+}
+
+#if0
+void
+event_logging_cb(int severity, const char *msg)
+{
+	const char *s;
+
+	switch (severity) {
+	case EVENT_LOG_DEBUG:
+		s = "\x1b[37mD";
+		break;
+	case EVENT_LOG_MSG:
+		s = "\x1b[34mM";
+		break;
+	case EVENT_LOG_WARN:
+		s = "\x1b[33mW";
+		break;
+	case EVENT_LOG_ERR:
+		s = "\x1b[31mE";
+		break;
+	default:
+		/* never reached */
+		s = "\x1b[31m?";
+		break;
+	}
+
+	pprintf(__func__, "%s %s\n\x1b[0m", s, msg);
+}
+#endif
+
 void	 snmpd_shutdown(struct snmpd *);
 void	 snmpd_sig_handler(int, short, void *);
 int	 snmpd_dispatch_snmpe(int, struct privsep_proc *, struct imsg *);
@@ -59,6 +131,7 @@ static struct privsep_proc procs[] = {
 void
 snmpd_sig_handler(int sig, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", sig, event, arg);
 	struct privsep	*ps = arg;
 	struct snmpd	*env = ps->ps_env;
 	int		 die = 0, status, fail, id;
@@ -137,6 +210,38 @@ usage(void)
 int
 main(int argc, char *argv[])
 {
+	// event_enable_debug_logging(EVENT_DBG_ALL);
+
+	setbuf(stdout, NULL);
+	setbuf(stderr, NULL);
+
+	puts("");
+	puts("");
+	puts("");
+	pprintf(__func__, "start; argv: ");
+	for (int i = 0; i < argc; i++) { // XXX: size_t int
+		printf("%s ", argv[i]);
+	}
+	printf("\n");
+
+	pprintf(__func__, "fstat:\n");
+	systemf("fstat -p %jd", (intmax_t)getpid());
+
+	// run snmpd alone
+	// ./snmpd -P snmpe -I 0 -dddddvvvvv
+	//   0      1 2      3 4  5
+	// snmpe proxy: see scrapbox
+	{
+		int flags = fcntl(3, F_GETFD);
+		if (flags == -1 && argc >= 3 && strcmp(argv[2], "snmpe") == 0) {
+			pprintf(__func__, "run snmpd alone\n");
+			pprintf(__func__, "make send(3, ...) work\n");
+			int fds[2];
+			socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, fds);
+			pprintf(__func__, "done; socketpair at %d and %d\n", fds[0], fds[1]);
+		}
+	}
+
 	int		 c;
 	struct snmpd	*env;
 	int		 debug = 0, verbose = 0;
@@ -175,6 +280,7 @@ main(int argc, char *argv[])
 			conffile = optarg;
 			break;
 		case 'I':
+			// always -I 0
 			proc_instance = strtonum(optarg, 0,
 			    PROC_MAX_INSTANCES, &errp);
 			if (errp)
@@ -200,6 +306,8 @@ main(int argc, char *argv[])
 	if (argc > 0)
 		usage();
 
+	extern int yydebug;
+	yydebug = 1;
 	if ((env = parse_config(conffile, flags)) == NULL)
 		exit(1);
 
@@ -228,9 +336,16 @@ main(int argc, char *argv[])
 	env->sc_engine_boots = 0;
 
 	pf_init();
+	{
+		extern int devpf;
+		pprintf(__func__, "opened /dev/pf at fd %d\n", devpf);
+	}
 	snmpd_generate_engineid(env);
 
 	proc_init(ps, procs, nitems(procs), debug, argc0, argv0, proc_id);
+	pprintf(__func__, "proc_init() returned; fstat:\n");
+	systemf("fstat -p %jd", (intmax_t)getpid());
+
 	if (!debug && daemon(0, 0) == -1)
 		err(1, "failed to daemonize");
 

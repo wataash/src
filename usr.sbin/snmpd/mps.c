@@ -154,6 +154,8 @@ mps_getreq(struct snmp_message *msg, struct ber_element *root,
 		goto fail;
 	}
 
+	// value->o_get(): See comments in o_get
+
 	if ((value->o_flags & OID_TABLE) == 0)
 		elm = ber_add_oid(elm, o);
 	if (value->o_get(value, o, &elm) != 0)
@@ -200,6 +202,7 @@ mps_getnextreq(struct snmp_message *msg, struct ber_element *root,
 	struct ber_element	*ber = root;
 	struct oid		 key, *value;
 	int			 ret;
+	// next oid?
 	struct ber_oid		 no;
 	unsigned long		 error_type = 0; 	/* noSuchObject */
 
@@ -230,6 +233,7 @@ mps_getnextreq(struct snmp_message *msg, struct ber_element *root,
 		/* Get the next table row for this column */
 		if (mps_table(value, o, &no) != NULL) {
 			bcopy(&no, o, sizeof(*o));
+			// See comments in o_get
 			ret = value->o_get(value, o, &ber);
 		} else
 			ret = 1;

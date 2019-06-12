@@ -68,12 +68,47 @@ int	 mib_getsnmp(struct oid *, struct ber_oid *, struct ber_element **);
 int	 mib_sysor(struct oid *, struct ber_oid *, struct ber_element **);
 int	 mib_setsnmp(struct oid *, struct ber_oid *, struct ber_element **);
 
+/**
+ * Will be stored in smi_oidtree and smi_keytree
+ *
+ * {
+ *   { {{1}},                        "iso" },
+ *   { {{1,3}},                      "org" },
+ *   { {{1,3,6}},                    "dod" },
+ *   { {{1,3,6,1}},                  "internet" },
+ *   { {{1,3,6,1,1}},                "directory" },
+ *   { {{1,3,6,1,2}},                "mgmt" },
+ *   { {{1,3,6,1,2,1}},              "mib_2" },
+ *   { {{1,3,6,1,2,1,1}},            "system" },
+ *   { {{1,3,6,1,2,1,1,1}},          "sysDescr" },
+ *   { {{1,3,6,1,2,1,1,2}},          "sysOID" },
+ *   { {{1,3,6,1,2,1,1,3}},          "sysUpTime" },
+ *   { {{1,3,6,1,2,1,1,4}},          "sysContact" },
+ *   { {{1,3,6,1,2,1,1,5}},          "sysName" },
+ *   { {{1,3,6,1,2,1,1,6}},          "sysLocation" },
+ *   { {{1,3,6,1,2,1,1,7}},          "sysServices" },
+ *   { {{1,3,6,1,2,1,1,8}},          "sysORLastChange" },
+ *   { {{1,3,6,1,2,1,1,9}},          "sysORTable" },
+ *   { {{1,3,6,1,2,1,1,9,1}},        "sysOREntry" },
+ *   { {{1,3,6,1,2,1,1,9,1,1}},      "sysORIndex" },
+ *   ...
+ *   { {{1,3,6,1,2,1,4,24,7,1,17}},  "ipfRouteEntStatus" },
+ *   { {{0}},((                      void*)0 )}
+ * }
+ */
 static struct oid mib_tree[] = MIB_TREE;
 static struct ber_oid zerodotzero = { { 0, 0 }, 2 };
 
 #define sizeofa(_a) (sizeof(_a) / sizeof((_a)[0]))
 
 /* base MIB tree */
+/**
+ * struct oid: {        o_id{bo_id,bo_n}  o_name  o_flags o_get        o_set      o_table           ... }
+ *                       MIB_mib_2,0      NULL    OID_MIB NULL         NULL       NULL
+ *                  MIB_sysContact,0      NULL    OID_RW  mib_getsys   mps_setstr NULL
+ *                     MIB_ifDescr,0      NULL    OID_TRD mib_iftable  NULL       NULL
+ *         MIB_ipNetToMediaIfIndex,0      NULL    OID_TRD mib_physaddr NULL       mib_physaddrtable
+ */
 static struct oid base_mib[] = {
 	{ MIB(mib_2),			OID_MIB },
 	{ MIB(sysDescr),		OID_RD, mib_getsys },
@@ -189,6 +224,87 @@ mib_getsys(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	return (0);
 }
 
+/**
+ * OIDIDX_* OIDIDX_*Entry
+ *
+ * .1.3.6.1.2.1.1.9.1.4
+ *  .iso.org.dod.internet.mgmt.mib-2.system.sysORTable.sysOREntry.sysORUpTime.N   OID
+ *  .1  .3  .6  .1       .2   .1    .1     .9         .1         .4          .N   OID
+ *   0   1   2   3        4    5     6      7          8          9           10  C index
+ *                                          ^                     ^           ^
+ *                                          OIDIDX_system(7)      OIDIDX_sysOR(9)
+ *                                                                1 sysORIndex  2 sysORID  3 sysORDescr  4 sysORUpTime
+ *                                                                mib_sysor():
+ *                                                                switch (o->bo_id[OIDIDX_sysOR])
+ *                                                                case 1234
+ *                                                                            OIDIDX_sysOREntry(10)
+ *                                                                            idx = o->bo_id[OIDIDX_sysOREntry] = N
+ *
+ * struct oid *oid->o_id.bo_id (as snmpwalked, never used):
+ * .1.3.6.1.2.1.1.9.1.4
+ * struct ber_oid *o->bo_id (idx completed):
+ * .1.3.6.1.2.1.1.9.1.4.1
+ *                      ^ added, idx (N)
+ *
+ * snmpwalk SNMPv2-MIB::sysORTable:
+ *                 ____ added
+ * .1.3.6.1.2.1.1.9.1.1
+ * .1.3.6.1.2.1.1.9.1.4.1
+ *                      ^ added, idx (N)
+ *
+ * snmpwalk SNMPv2-MIB::sysORUpTime.9.9:
+ *                     _____ removed
+ * .1.3.6.1.2.1.1.9.1.4
+ * .1.3.6.1.2.1.1.9.1.4.10.9
+ *                      ^^   increased
+ * then, get-request:
+ *                     _____ removed
+ * .1.3.6.1.2.1.1.9.1.4
+ * .1.3.6.1.2.1.1.9.1.4.9.9  (as snmpgetted)
+ *
+ *
+ * SNMPv2-MIB::snmpInPkts
+ *   .1.3.6.1.2.1.11.1
+ *   .iso.org.dod.internet.mgmt.mib-2.snmp.snmpInPkts
+ *   .1  .3  .6  .1       .2   .1    .11  .1
+ *    0   1   2   3        4    5      6   7
+ *                                         ^
+ *                                         OIDIDX_snmp 7
+ *
+ *   1 snmpInPkts        2 OutPkts          3 InBadVersions     4 none             5 InBadCommunityUses
+ *   6 InASNParseErrs    7 none             8 InTooBigs         9 InNoSuchNames   10 InBadValues
+ *   11 InReadOnlys     12 InGenErrs       13 InTotalReqVars   14 InTotalSetVars  15 InGetRequests
+ *   16 InGetNexts      17 InSetRequests   18 InGetResponses   19 InTraps         20 OutTooBigs
+ *   21 OutNoSuchNames  22 OutBadValues    23 none             24 OutGenErrs      25 OutGetRequests
+ *   26 OutGetNexts     27 OutSetRequests  28 OutGetResponses  29 OutTraps        30 none
+ *   31 SilentDrops     32 ProxyDrops
+ *
+ *
+ * IF-MIB::ifDescr
+ *   mib_iftable()
+ *
+ *   .1.3.6.1.2.1.2.2.1.2
+ *   .iso.org.dod.internet.mgmt.mib-2.interfaces.ifTable.ifEntry.ifDescr.N
+ *   .1  .3  .6  .1       .2   .1    .2         .2      .1      .2      .N
+ *    0   1   2   3        4    5     6          7       8       9       10
+ *                                                               ^       ^
+ *                                                               OIDIDX_if 9
+ *                                                                       OIDIDX_ifEntry 10
+ *
+ * IP-MIB::ipAdEntAddr
+ *   mib_ipaddrtable()
+ *   mib_ipaddr()
+ *
+ *   .1.3.6.1.2.1.4.20.1.1
+ *   .iso.org.dod.internet.mgmt.mib-2.ip.ipAddrTable.ipAddrEntry.ipAdEntAddr.N.N.N.N
+ *   .1  .3  .6  .1       .2   .1    .4 .20         .1          .1          .N.N.N.N
+ *    0   1   2   3        4    5     6  7           8           9           10
+ *                                       ^                       ^           ^
+ *                                       OIDIDX_ip 7             OIDIDX_ipAddr 9
+ *                                                               switch 12345
+ *                                                                           OIDIDX_ipAddrEntry 10
+ *                                                                           mps_decodeinaddr()
+ */
 int
 mib_sysor(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 {
@@ -210,6 +326,7 @@ mib_sysor(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	for (next = miboid = NULL, nmib = 1;
 	    (next = smi_foreach(next, OID_MIB)) != NULL; nmib++) {
 		if (nmib == idx)
+			// should break
 			miboid = next;
 	}
 	if (miboid == NULL)
@@ -332,6 +449,9 @@ mib_setsnmp(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 int	 mib_engine(struct oid *, struct ber_oid *, struct ber_element **);
 int	 mib_usmstats(struct oid *, struct ber_oid *, struct ber_element **);
 
+/**
+ * see base_mib
+ */
 static struct oid usm_mib[] = {
 	{ MIB(snmpEngine),			OID_MIB },
 	{ MIB(snmpEngineID),			OID_RD, mib_engine },
@@ -418,6 +538,9 @@ void	 kinfo_timer_cb(int, short, void *);
 void	 kinfo_proc_free(void);
 int	 kinfo_args(struct kinfo_proc *, char **);
 
+/**
+ * see base_mib
+ */
 static struct oid hr_mib[] = {
 	{ MIB(host),				OID_MIB },
 	{ MIB(hrSystemUptime),			OID_RD, mib_hrsystemuptime },
@@ -935,6 +1058,7 @@ cached:
 void
 kinfo_timer_cb(int fd, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", fd, event, arg);
 	kinfo_proc_free();
 }
 
@@ -1012,6 +1136,9 @@ int	 mib_ifrcvtable(struct oid *, struct ber_oid *, struct ber_element **);
 
 static u_int8_t ether_zeroaddr[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
+/**
+ * see base_mib
+ */
 static struct oid if_mib[] = {
 	{ MIB(ifMIB),			OID_MIB },
 	{ MIB(ifName),			OID_TRD, mib_ifxtable },
@@ -1069,12 +1196,30 @@ mib_ifnumber(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	return (0);
 }
 
+/**
+ * kr_getif
+ *
+ * mib_ifget(5) -> 6 bridge0
+ *
+ * Callers:
+ *   mib_dot1dtable
+ *   mib_ifrcvtable
+ *   mib_iftable
+ *   mib_ifxtable
+ *   mib_memiftable
+ *
+ * @see kr_getif kif_find
+ */
 struct kif *
 mib_ifget(u_int idx)
 {
 	struct kif	*kif;
 
 	if ((kif = kr_getif(idx)) == NULL) {
+		// snmpwalk IF-MIB::ifName
+		//   ifName.1:em0, ifName.2:enc0, ifName.3:lo0 ifName.4:pflog0
+		//   ifName.5:none -> reaches here (idx==5) returns 6:bridge0
+		//   ifName.7:none -> reaches here (idx==7) returns NULL
 		/*
 		 * It may happen that an interface with a specific index
 		 * does not exist or has been removed. Jump to the next
@@ -1351,6 +1496,8 @@ mib_ifstacklast(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 int
 mib_ifrcvtable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 {
+	// works w/o KIF_IF_RESPONSE in mib_ifget()
+
 	struct ber_element	*ber = *elm;
 	u_int32_t		 idx = 0;
 	struct kif		*kif;
@@ -1445,6 +1592,9 @@ struct carpif
 	*mib_carpifget(u_int);
 int	 mib_memiftable(struct oid *, struct ber_oid *, struct ber_element **);
 
+/**
+ * see base_mib
+ */
 static struct oid openbsd_mib[] = {
 	{ MIB(pfMIBObjects),		OID_MIB },
 	{ MIB(pfRunning),		OID_RD, mib_pfinfo },
@@ -2833,6 +2983,7 @@ mib_carpifget(u_int idx)
 	ifr.ifr_data = (caddr_t)&carpr;
 
 	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1) {
+		pprintf(__func__, "close %d\n", s);
 		close(s);
 		return (NULL);
 	}
@@ -2843,6 +2994,7 @@ mib_carpifget(u_int idx)
 		memcpy(&cif->kif, kif, sizeof(struct kif));
 	}
 
+	pprintf(__func__, "close %d\n", s);
 	close(s);
 
 	return (cif);
@@ -2927,6 +3079,7 @@ mib_carpgroupget(u_int idx)
 		log_warn("SIOCGIFGLIST");
 		goto err;
 	}
+	pprintf(__func__, "close %d\n", s);
 	close(s);
 
 	if ((ifg = calloc(1, sizeof *ifg)) == NULL) {
@@ -2939,6 +3092,7 @@ mib_carpgroupget(u_int idx)
 	return ifg;
  err:
 	free(ifgr.ifgr_groups);
+	pprintf(__func__, "close %d\n", s);
 	close(s);
 	return (NULL);
 }
@@ -2976,11 +3130,13 @@ mib_carpgrouptable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		strlcpy(ifgr.ifgr_name, ifg->ifgrq_group, sizeof(ifgr.ifgr_name));
 		if (ioctl(s, SIOCGIFGATTR, (caddr_t)&ifgr) == -1) {
 			log_warn("SIOCGIFGATTR");
+			pprintf(__func__, "close %d\n", s);
 			close(s);
 			free(ifg);
 			return (1);
 		}
 
+		pprintf(__func__, "close %d\n", s);
 		close(s);
 		*elm = ber_add_integer(*elm, ifgr.ifgr_attrib.ifg_carp_demoted);
 		break;
@@ -3045,6 +3201,9 @@ int mib_physaddr(struct oid *, struct ber_oid *, struct ber_element **);
 struct ber_oid *
     mib_physaddrtable(struct oid *, struct ber_oid *, struct ber_oid *);
 
+/**
+ * see base_mib
+ */
 static struct oid ip_mib[] = {
 	{ MIB(ipMIB),			OID_MIB },
 	{ MIB(ipForwarding),		OID_RD, mib_ipforwarding },
@@ -3271,6 +3430,7 @@ mib_iproutingdiscards(struct oid *oid, struct ber_oid *o,
 	return (0);
 }
 
+// IP-MIB::ipAddrTable IP-MIB::ipAdEntIfIndex
 struct ber_oid *
 mib_ipaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 {
@@ -3304,6 +3464,7 @@ mib_ipaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 		}
 	}
 
+	// OIDIDX_ipAddr + 1 should be OIDIDX_ipAddrEntry
 	mps_decodeinaddr(no, &addr.sin_addr, OIDIDX_ipAddr + 1);
 	if (o->bo_n <= (OIDIDX_ipAddr + 1))
 		ka = kr_getaddr(NULL);
@@ -3377,6 +3538,28 @@ mib_ipaddr(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	return (0);
 }
 
+/**
+ * ipNetToMedia: iNTM
+ *
+ * .1.3.6.1.2.1.4.22      IP-MIB::iNetToMediaTable        .iso.org.dod.internet.mgmt.mib-2.ip.iNTMTable
+ * .1.3.6.1.2.1.4.22.1    IP-MIB::iNetToMediaEntry        .iso.org.dod.internet.mgmt.mib-2.ip.iNTMTable.iNTMEntry
+ * .1.3.6.1.2.1.4.22.1.1  IP-MIB::iNetToMediaIfIndex      .iso.org.dod.internet.mgmt.mib-2.ip.iNTMTable.iNTMEntry.iNTMIfIndex
+ * .1.3.6.1.2.1.4.22.1.2  IP-MIB::iNetToMediaPhysAddress  .iso.org.dod.internet.mgmt.mib-2.ip.iNTMTable.iNTMEntry.iNTMPhysAddress
+ * .1.3.6.1.2.1.4.22.1.3  IP-MIB::iNetToMediaNetAddress   .iso.org.dod.internet.mgmt.mib-2.ip.iNTMTable.iNTMEntry.iNTMNetAddress
+ * .1.3.6.1.2.1.4.22.1.4  IP-MIB::iNetToMediaType         .iso.org.dod.internet.mgmt.mib-2.ip.iNTMTable.iNTMEntry.iNTMType
+ *
+ *
+ * .iso....ip.iNTMTable.iNTMEntry.iNTMIfIndex.N            OID
+ * .1     .4 .22       .1        .1          .1.192.0.0.1  OID
+ *  0      6  7         8         9           0 11  2 3 4  C index
+ *            ^                   ^           ^
+ *            OIDIDX_ip(7)        OIDIDX_ipNetToMedia(9)
+ *                                            ipNetToMediaIfIndex (en0:1)
+ *
+ * ipNetToMediaEntry(10) があっても良さそうだが無い
+ *
+ * @see mib_sysor o_get
+ */
 struct ber_oid *
 mib_physaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 {
@@ -3385,6 +3568,23 @@ mib_physaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 	struct kif		*kif;
 	struct kif_arp		*ka;
 	u_int32_t		 id, idx = 0;
+
+	// snmpwalk .1.3
+	//
+	// IP-MIB::ipAdEntReasmMaxSize.127.0.0.1 = INTEGER: 65535
+	// [1]
+	// IP-MIB::ipNetToMediaIfIndex.1.10.0.2.2 = INTEGER: 1
+	// [2]
+	// IP-MIB::ipNetToMediaIfIndex.1.10.0.2.15 = INTEGER: 1
+	// [3]
+	// IP-MIB::ipNetToMediaPhysAddress.1.10.0.2.2 = STRING: 52:55:a:0:2:2
+	// IP-MIB::ipNetToMediaPhysAddress.1.10.0.2.15 = STRING: 52:54:0:12:34:56
+	// IP-MIB::ipNetToMediaNetAddress.1.10.0.2.2 = IpAddress: 10.0.2.2
+	// IP-MIB::ipNetToMediaNetAddress.1.10.0.2.15 = IpAddress: 10.0.2.15
+	// IP-MIB::ipNetToMediaType.1.10.0.2.2 = INTEGER: dynamic(3)
+	// IP-MIB::ipNetToMediaType.1.10.0.2.15 = INTEGER: dynamic(3)
+	// [end]
+	// IP-FORWARD-MIB::inetCidrRouteNumber.0 = Gauge32: 6
 
 	bcopy(&oid->o_id, no, sizeof(*no));
 	id = oid->o_oidlen - 1;
@@ -3401,23 +3601,54 @@ mib_physaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 		b.o_oidlen--;
 		b.o_flags |= OID_TABLE;
 		if (smi_oid_cmp(&a, &b) == 0) {
+			// [2]
+			//            a,b:tmp  0 1 2 3 4 5 6 7  8 9 0  1 2 3 4
+			// o          a.o_id  .1.3.6.1.2.1.4.22.1.1.1.10.0.2.2 (bo_n 15)
+			// oid->o_id  b.o_id  .1.3.6.1.2.1.4.22.1.1            (bo_n 10)
+			//                    \_________________/
+			//                            compare
+			//                           if matched:  ^ copy oid->o
+			//                                          and no=o (prev: no=&oid->o_id)
+			//
+			// [3]
+			// TODO
+			//
+			// [end]
+			// TODO
 			o->bo_id[id] = oid->o_oid[id];
 			bcopy(o, no, sizeof(*no));
 		}
+		else {
+			// [1]
+			// index      0 1 2 3 4 5 6  7 8 9  10  11  12  13
+			// o         .1.3.6.1.2.1.4.20.1.5.255.255.255.255  bo_n 10
+			// oid->o_id .1.3.6.1.2.1.4.22.1.1 ^^^garbage?      bo_n 10
+			//            \________________/ not matched, do nothing
+			int breakpoint = 0;
+			(void)breakpoint;
+		}
+	}
+	else {
+		// snmpwalk  IP-MIB:ipNetToMediaTable
+		int breakpoint = 0;
+		(void)breakpoint;
 	}
 
 	if (o->bo_n > OIDIDX_ipNetToMedia + 1)
+		// [2] [3] [end]
 		idx = o->bo_id[OIDIDX_ipNetToMedia + 1];
 
 	bzero(&addr, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_len = sizeof(addr);
 	if (o->bo_n > OIDIDX_ipNetToMedia + 2)
+		// [2] [3] [end]
 		mps_decodeinaddr(no, &addr.sin_addr, OIDIDX_ipNetToMedia + 2);
 
 	if ((kif = kr_getif(idx)) == NULL) {
 		/* No configured interfaces */
 		if (idx == 0)
+			// XXX: when no interface?
 			return (NULL);
 		/*
 		 * It may happen that an interface with a specific index
@@ -3429,8 +3660,10 @@ mib_physaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 		for (; kif != NULL; kif = kr_getnextif(kif->if_index))
 			if (kif->if_index > idx &&
 			    (ka = karp_first(kif->if_index)) != NULL)
+				// XXX: unreachable?
 				break;
 		if (kif == NULL) {
+			// [3] [end]
 			/* No more interfaces with addresses on them */
 			o->bo_id[OIDIDX_ipNetToMedia + 1] = 0;
 			mps_encodeinaddr(no, NULL, OIDIDX_ipNetToMedia + 2);
@@ -3439,21 +3672,39 @@ mib_physaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 		}
 	} else {
 		if (idx == 0 || addr.sin_addr.s_addr == 0)
+			// [1] idx 0
 			ka = karp_first(kif->if_index);
 		else
+			// [2] [3] [end]
 			ka = karp_getaddr((struct sockaddr *)&addr, idx, 1);
 		if (ka == NULL) {
+			// [3] [end]
 			/* Try next interface */
 			goto nextif;
 		}
 	}
+	// [1] 0 = 1
+	// [2] 1 = 1
 	idx = kif->if_index;
 
+	/*
+	 * .iso....ip.iNTMTable.iNTMEntry.iNTMIfIndex.N         .ip.ip.ip.ip
+	 * .1     .4 .22       .1        .1          .(ifIndex)
+	 *  0      6  7         8         9           0          11 12 13 14  C index
+	 *            ^                   ^           ^
+	 *            OIDIDX_ip(7)        OIDIDX_ipNetToMedia(9)
+	 * N = ifINdex
+	 */
 	no->bo_id[OIDIDX_ipNetToMedia + 1] = idx;
 	/* Encode real IPv4 address */
 	memcpy(&addr, &ka->addr.sin, ka->addr.sin.sin_len);
 	mps_encodeinaddr(no, &addr.sin_addr, OIDIDX_ipNetToMedia + 2);
 
+	// why?
+	// and bug?
+	//          v zero
+	// ....1.10.0.2.2
+	//    10 11 2 3 4   bo_n: 15 -> 12
 	smi_oidlen(o);
 	return (no);
 }
@@ -3466,12 +3717,15 @@ mib_physaddr(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	struct kif_arp		*ka;
 	u_int32_t		 val, idx = 0;
 
+	// ifIndex =
 	idx = o->bo_id[OIDIDX_ipNetToMedia + 1];
 	if (idx == 0) {
+		//
 		/* Strip invalid interface index and fail */
 		o->bo_n = OIDIDX_ipNetToMedia + 1;
 		return (1);
 	}
+	// [1] [2] [3] etc
 
 	/* Get the IP address */
 	bzero(&addr, sizeof(addr));
@@ -3481,10 +3735,14 @@ mib_physaddr(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	if (mps_decodeinaddr(o, &addr.sin_addr,
 	    OIDIDX_ipNetToMedia + 2) == -1) {
 		/* Strip invalid address and fail */
+		// ?
 		o->bo_n = OIDIDX_ipNetToMedia + 2;
 		return (1);
 	}
+	// [1] [2] [3] etc
+
 	if ((ka = karp_getaddr((struct sockaddr *)&addr, idx, 0)) == NULL)
+		// ?
 		return (1);
 
 	/* write OID */
@@ -3492,14 +3750,21 @@ mib_physaddr(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 
 	switch (o->bo_id[OIDIDX_ipNetToMedia]) {
 	case 1: /* ipNetToMediaIfIndex */
+		// [1] [2]
 		ber = ber_add_integer(ber, ka->if_index);
 		break;
 	case 2: /* ipNetToMediaPhysAddress */
 		if (bcmp(LLADDR(&ka->target.sdl), ether_zeroaddr,
 		    sizeof(ether_zeroaddr)) == 0)
+			// ?
 			ber = ber_add_nstring(ber, ether_zeroaddr,
 			    sizeof(ether_zeroaddr));
 		else
+			// [3] [4]
+			// 52:54:00:12:34:56
+			// (gdb) x/10b &ka->target.sdl.sdl_data
+			// 0xd74dc593bac: 0x65 0x6d 0x30 0x52 0x54 0x00 0x12 0x34
+			// 0xd74dc593bb4: 0x56 0x00
 			ber = ber_add_nstring(ber, LLADDR(&ka->target.sdl),
 			    ka->target.sdl.sdl_alen);
 		break;
@@ -3512,11 +3777,14 @@ mib_physaddr(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		if (ka->flags & F_STATIC)
 			ber = ber_add_integer(ber, 4); /* static */
 		else
+			// [5] [6]
 			ber = ber_add_integer(ber, 3); /* dynamic */
 		break;
 	default:
+		// ?
 		return (-1);
 	}
+	// [1] [2] [3] etc
 	return (0);
 }
 
@@ -3529,6 +3797,9 @@ struct ber_oid *
 mib_ipfroutetable(struct oid *oid, struct ber_oid *o, struct ber_oid *no);
 int mib_ipfroute(struct oid *, struct ber_oid *, struct ber_element **);
 
+/**
+ * see base_mib
+ */
 static struct oid ipf_mib[] = {
 	{ MIB(ipfMIB),			OID_MIB },
 	{ MIB(ipfInetCidrRouteNumber),	OID_RD, mib_ipfnroutes },
@@ -3583,6 +3854,7 @@ mib_ipfroutetable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 	addr.sin_len = sizeof(addr);
 
 	bcopy(&oid->o_id, no, sizeof(*no));
+	// OIDIDX_ipAddr 9
 	id = oid->o_oidlen - 1;
 
 	if (o->bo_n >= oid->o_oidlen) {
@@ -3769,6 +4041,9 @@ mib_ipfroute(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 
 int	mib_diskio(struct oid *oid, struct ber_oid *o, struct ber_element **elm);
 
+/**
+ * see base_mib
+ */
 static struct oid diskio_mib[] = {
 	{ MIB(ucdDiskIOMIB),			OID_MIB },
 	{ MIB(diskIOIndex),			OID_TRD, mib_diskio },
@@ -3866,10 +4141,14 @@ mib_diskio(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 
 int	 mib_dot1dtable(struct oid *, struct ber_oid *, struct ber_element **);
 
+/**
+ * see base_mib
+ */
 static struct oid bridge_mib[] = {
 	{ MIB(dot1dBridge),		OID_MIB },
 	{ MIB(dot1dBaseBridgeAddress) },
 	{ MIB(dot1dBaseNumPorts),	OID_RD, mib_ifnumber },
+	// TODO: verify
 	{ MIB(dot1dBaseType),		OID_RD, mps_getint, NULL,
 	    NULL, 4 /* srt (sourceroute + transparent) */ },
 	{ MIB(dot1dBasePort),		OID_TRD, mib_dot1dtable },

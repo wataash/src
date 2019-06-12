@@ -105,7 +105,32 @@ vlog(int pri, const char *fmt, va_list ap)
 			vfprintf(stderr, fmt, ap);
 			fprintf(stderr, "\n");
 		} else {
+			switch (pri){
+			case LOG_CRIT:
+				fprintf(stderr, "\x1b[31mC ");
+				break;
+			case LOG_ERR:
+				fprintf(stderr, "\x1b[31mE ");
+				break;
+			case LOG_WARNING:
+				fprintf(stderr, "\x1b[33mW ");
+				break;
+			case LOG_NOTICE:
+				fprintf(stderr, "\x1b[34mN ");
+				break;
+			case LOG_INFO:
+				fprintf(stderr, "\x1b[34mI ");
+				break;
+			case LOG_DEBUG:
+				fprintf(stderr, "\x1b[37mD ");
+				break;
+			default:
+				/* never reached */
+				fprintf(stderr, "\x1b[31m? ");
+				break;
+			}
 			vfprintf(stderr, nfmt, ap);
+			fprintf(stderr, "\x1b[0m");
 			free(nfmt);
 		}
 		fflush(stderr);

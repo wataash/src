@@ -63,6 +63,7 @@ trap_agentx(struct agentx_handle *h, struct agentx_pdu *pdu, int *idx,
 	struct ber_element		*varbind, *iter;
 	int				 x = 0, state = 0;
 	int				 ret = AGENTX_ERR_NONE;
+	__unused
 	int				 seensysuptime, seentrapoid;
 	size_t				 len = 0;
 	char				*v = NULL;
@@ -199,6 +200,7 @@ trap_send(struct ber_oid *oid, struct ber_element *elm)
 			ret = -1;
 			goto done;
 		}
+		// 失敗すると後の trap receiver は無視されてしまうのか :P
 		if (tr->sa_srcaddr != NULL) {
 			if (bind(s, (struct sockaddr *)&tr->sa_srcaddr->ss,
 			    tr->sa_srcaddr->ss.ss_len) == -1) {
@@ -229,6 +231,7 @@ trap_send(struct ber_oid *oid, struct ber_element *elm)
 		}
 
 		close(s);
+		pprintf(__func__, "close %d\n", s);
 		ber_unlink_elements(b);
 		ber_free_elements(root);
 	}

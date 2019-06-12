@@ -200,6 +200,11 @@ struct kroute6_node;
 RB_HEAD(kroute_tree, kroute_node);
 RB_HEAD(kroute6_tree, kroute6_node);
 
+/**
+ * krt[0]
+ *
+ * @see krt
+ */
 struct ktable {
 	struct kroute_tree	 krt;
 	struct kroute6_tree	 krt6;
@@ -232,6 +237,10 @@ struct kroute6 {
 	u_int16_t	flags;
 	u_short		if_index;
 	u_int8_t	prefixlen;
+	/**
+	 * (struct rt_msghdr)rtm.rtm_priority
+	 * kroute_find
+	 */
 	u_int8_t	priority;
 };
 
@@ -246,9 +255,12 @@ struct kif_addr {
 };
 
 struct kif_arp {
+	/** F_* */
 	u_short			 flags;
 	u_short			 if_index;
+	/** ipv4 in arp -a */
 	union kaddr		 addr;
+	/** mac in arp -a */
 	union kaddr		 target;
 
 	TAILQ_ENTRY(kif_arp)	 entry;
@@ -300,10 +312,29 @@ struct oid {
 #define o_oid			 o_id.bo_id
 #define o_oidlen		 o_id.bo_n
 
+	/** e.g. sysORUpTime */
 	char			*o_name;
 
+	/** OID_* */
 	u_int			 o_flags;
 
+	/**
+	 * O_RD (0x01) の場合 (get-request)
+	 *   多分下の get-request と同じ。
+	 *
+	 * OID_TRD (0x11 17) の場合
+	 *   get-next-request:
+	 *     0 を返すと次のOIDを返す。ber_add_oid() が必要。
+	 *     送信するOIDは ber_add_oidにセットしたもの。
+	 *     1 を返すと次のOIDのresponseを送る。
+	 *     -1 を返すと noSuchObject を送る。
+	 *   get-request:
+	 *     0 を返すとそのOIDの値を送信する。ber_add_oid() が必要。
+	 *     送信するOIDは ber_add_oidにセットしたもの。
+	 *     1, -1 (0 以外) を返すと noSuchObject を送る。
+	 *
+	 * See also: mib_sysor()
+	 */
 	int			 (*o_get)(struct oid *, struct ber_oid *,
 				    struct ber_element **);
 	int			 (*o_set)(struct oid *, struct ber_oid *,
@@ -311,7 +342,10 @@ struct oid {
 	struct ber_oid		*(*o_table)(struct oid *, struct ber_oid *,
 				    struct ber_oid *);
 
+	// See ip_mib
 	long long		 o_val;
+	// will not initialized in smi_mibtree() below
+	// set by mps_set()
 	void			*o_data;
 
 	struct ctl_conn		*o_session;
@@ -400,6 +434,9 @@ struct pfr_buffer {
 #define MSG_SECLEVEL(m)		((m)->sm_flags & SNMP_MSGFLAG_SECMASK)
 #define MSG_REPORT(m)		(((m)->sm_flags & SNMP_MSGFLAG_REPORT) != 0)
 
+/**
+ * snmpe_recvmsg() で受信したパケットを snmpe_parse() でパースして格納する
+ */
 struct snmp_message {
 	int			 sm_sock;
 	struct sockaddr_storage	 sm_ss;
@@ -411,6 +448,7 @@ struct snmp_message {
 	struct sockaddr_storage	 sm_local_ss;
 	socklen_t		 sm_local_slen;
 
+	/** パケット解析 (ber_read_elements()) の際のバッファ */
 	struct ber		 sm_ber;
 	struct ber_element	*sm_req;
 	struct ber_element	*sm_resp;
@@ -423,9 +461,11 @@ struct snmp_message {
 	struct ber_element	*sm_last;
 	struct ber_element	*sm_end;
 
+	/** buffer for recvfromto() */
 	u_int8_t		 sm_data[READ_BUF_SIZE];
 	size_t			 sm_datalen;
 
+	/** SNMP_V* */
 	u_int			 sm_version;
 	u_int			 sm_state;
 
@@ -437,6 +477,7 @@ struct snmp_message {
 	long long		 sm_msgid;
 	long long		 sm_max_msg_size;
 	u_int8_t		 sm_flags;
+	/** SNMP_SEC_* */
 	long long		 sm_secmodel;
 	u_int32_t		 sm_engine_boots;
 	u_int32_t		 sm_engine_time;
@@ -449,6 +490,7 @@ struct snmp_message {
 	struct usmuser		*sm_user;
 	size_t			 sm_digest_offs;
 	char			 sm_salt[SNMP_USM_SALTLEN];
+	/** OIDVAL_usm* */
 	int			 sm_usmerr;
 
 	long long		 sm_request;
@@ -594,6 +636,10 @@ struct snmpd {
 	int64_t			*sc_cpustates;
 	int			 sc_rtfilter;
 
+	/**
+	 * snmpd.conf seclevel
+	 * 0 以外なら SNMP_V[12] は許容しない
+	 */
 	int			 sc_min_seclevel;
 	int			 sc_readonly;
 	int			 sc_traphandler;

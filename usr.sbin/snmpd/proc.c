@@ -61,6 +61,8 @@ proc_ispeer(struct privsep_proc *procs, unsigned int nproc,
 	return (0);
 }
 
+/// proc_getid(procs, 2, "snmpe") -> 1 (PROC_SNMPE)
+/// proc_getid(procs, 2, "traphandler") -> 2 (PROC_TRAP)
 enum privsep_procid
 proc_getid(struct privsep_proc *procs, unsigned int nproc,
     const char *proc_name)
@@ -89,6 +91,9 @@ proc_exec(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 	char			 num[32];
 	int			 fd;
 
+	// argv  /Users/wsh/.../snmpd -dddddvvvvv
+	// argc 2
+
 	/* Prepare the new process argv. */
 	nargv = calloc(argc + 5, sizeof(char *));
 	if (nargv == NULL)
@@ -101,7 +106,12 @@ proc_exec(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 	/* Set process name argument and save the position. */
 	nargv[nargc++] = "-P";
 	proc_i = nargc;
+	// proc_i: 2
 	nargc++;
+
+	//       0                    1  2(proc_i)
+	// nargv /Users/wsh/.../snmpd -P NULL
+	// nargc 3
 
 	/* Point process instance arg to stack and copy the original args. */
 	nargv[nargc++] = "-I";
@@ -109,30 +119,95 @@ proc_exec(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 	for (i = 1; i < (unsigned int) argc; i++)
 		nargv[nargc++] = argv[i];
 
+	//       0                    1  2(proc_i)    3  4     5           6
+	// nargv /Users/wsh/.../snmpd -P NULL         -I (num) -dddddvvvvv NULL
+	// nargc 6
+
 	nargv[nargc] = NULL;
 
+	pprintf(__func__, "before fork; fstat:\n");
+	systemf("fstat -p %jd", (intmax_t)getpid());
+
+	// nproc: 2 (snmpe, traphandler)
 	for (proc = 0; proc < nproc; proc++) {
 		p = &procs[proc];
 
+		// proc_i: 2
 		/* Update args with process title. */
 		nargv[proc_i] = (char *)(uintptr_t)p->p_title;
 
+		//       0                    1  2(proc_i)   3  4     5           6
+		// nargv /Users/wsh/.../snmpd -P snmpe       -I (num) -dddddvvvvv NULL
+		// nargv /Users/wsh/.../snmpd -P traphandler -I (num) -dddddvvvvv NULL
+		// nargc 6
+
+		// p->p_id:
+		(void)PROC_SNMPE;
+#ifndef NO_TRAPHANDLER_SUPPORT
+		(void)PROC_TRAP;
+#endif
 		/* Fire children processes. */
+		// ps->ps_instances: {1, 1, 1}
+		// since parent, snmpe and traphander exist exactly one each
+		// instance.
+		// thus i is always 0.
 		for (i = 0; i < ps->ps_instances[p->p_id]; i++) {
 			/* Update the process instance number. */
 			snprintf(num, sizeof(num), "%u", i);
 
+			// num: "0"
+			//       0                    1  2(proc_i)   3  4 5           6
+			// nargv /Users/wsh/.../snmpd -P snmpe       -I 0 -dddddvvvvv NULL
+			// nargv /Users/wsh/.../snmpd -P traphandler -I 0 -dddddvvvvv NULL
+			// nargc 6
+
+			// ps->ps_pipes
+			//                0(p)  1(s) 2(t)
+			// 0(parent)      -1     4    6
+			// 1(snmpe)        5    -1   -1
+			// 2(traphander)   7    -1   -1
+
+			// Should be:
+			//   *(ps->ps_pipes[p->p_id][i].pp_pipes[PROC_PARENT]);
+			// snmpe: *(ps->ps_pipes[1][0].pp_pipes[0])
+			// traph: *(ps->ps_pipes[2][0].pp_pipes[0])
 			fd = ps->ps_pipes[p->p_id][i].pp_pipes[PROC_PARENT][0];
+			// Should be:
+			// *(ps->ps_pipes[p->p_id][i].pp_pipes[PROC_PARENT])
 			ps->ps_pipes[p->p_id][i].pp_pipes[PROC_PARENT][0] = -1;
 
+			// ps->ps_pipes
+			//                0(p)  1(s) 2(t)
+			// 0(parent)      -1     4    6
+			// 1(snmpe)       -1    -1   -1
+			// 2(traphander)  -1    -1   -1
+
+			pprintf(__func__, "fork()\n");
 			switch (fork()) {
 			case -1:
 				fatal("%s: fork", __func__);
 				break;
 			case 0:
+				if (proc == PROC_SNMPE - 1) {
+					// 0
+					pprintf(__func__, "fork()ed snmpe\n");
+				} else if (proc == PROC_TRAP - 1){
+					// 1
+					pprintf(__func__, "fork()ed traphandler\n");
+				} else {
+					// 2, 3, ...
+					pprintf(__func__, "fork()ed yyy(%u)\n", proc);
+				}
+
 				/* First create a new session */
 				if (setsid() == -1)
 					fatal("setsid");
+
+				/* Prepare parent socket. */
+				if (fd != PROC_PARENT_SOCK_FILENO)
+					pprintf(__func__, "dup2 %d = %d\n", PROC_PARENT_SOCK_FILENO, fd);
+				else
+					pprintf(__func__, "fcntl(%d, F_SETFD, 0)", fd);
 
 				/* Prepare parent socket. */
 				if (fd != PROC_PARENT_SOCK_FILENO) {
@@ -142,21 +217,47 @@ proc_exec(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 				} else if (fcntl(fd, F_SETFD, 0) == -1)
 					fatal("fcntl");
 
+				if (fd != PROC_PARENT_SOCK_FILENO) {
+					pprintf(__func__, "dup2 done\n");
+					systemf("fstat -p %jd | grep -e '%d\\* unix'", (intmax_t)getpid(), PROC_PARENT_SOCK_FILENO);
+				} else {
+					pprintf(__func__, "fcntl done\n");
+					systemf("fstat -p %jd | grep -e '%d\\* unix'", (intmax_t)getpid(), fd);
+				}
+
 				/* Daemons detach from terminal. */
 				if (!debug && (fd =
 				    open(_PATH_DEVNULL, O_RDWR, 0)) != -1) {
 					(void)dup2(fd, STDIN_FILENO);
 					(void)dup2(fd, STDOUT_FILENO);
 					(void)dup2(fd, STDERR_FILENO);
-					if (fd > 2)
+					if (fd > 2) {
+						pprintf(__func__, "close %d\n", fd);
 						(void)close(fd);
+					}
 				}
+
+				// /Users/wsh/.../snmpd -P snmpe -I 0 -dddddvvvvv
+				pprintf(__func__, "execvp %s ", argv[0]);
+				for (char *const *p2 = nargv; *p2 != NULL; p2++)
+					printf("%s ", *p2);
+				printf("\n");
+				pprintf(__func__, "fstat:\n");
+				systemf("fstat -p %jd", (intmax_t)getpid());
 
 				execvp(argv[0], nargv);
 				fatal("%s: execvp", __func__);
 				break;
 			default:
+				{
+					int err = system("sleep 1.0");
+					(void)err;
+				}
+
 				/* Close child end. */
+				// snpme 5
+				// traph 7
+				pprintf(__func__, "close %d\n", fd);
 				close(fd);
 				break;
 			}
@@ -180,8 +281,13 @@ proc_connect(struct privsep *ps)
 		if (dst == PROC_PARENT)
 			continue;
 
+		// inst: always 0
 		for (inst = 0; inst < ps->ps_instances[dst]; inst++) {
+			// Should be:
+			//     ps->ps_ievs[dst]
 			iev = &ps->ps_ievs[dst][inst];
+			// Should be:
+			//                   *ps->ps_pp->pp_pipes[dst]
 			imsg_init(&iev->ibuf, ps->ps_pp->pp_pipes[dst][inst]);
 			event_set(&iev->ev, iev->ibuf.fd, iev->events,
 			    iev->handler, iev->data);
@@ -193,6 +299,7 @@ proc_connect(struct privsep *ps)
 	for (src = 0; src < PROC_MAX; src++)
 		for (dst = src; dst < PROC_MAX; dst++) {
 			/* Parent already distributed its fds. */
+			// ??
 			if (src == PROC_PARENT || dst == PROC_PARENT)
 				continue;
 
@@ -236,6 +343,14 @@ proc_init(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 				    PF_UNSPEC, fds) == -1)
 					fatal("%s: socketpair", __func__);
 
+				if (dst == PROC_SNMPE)
+					pprintf(__func__, "socketpair() for snmpe at fd %d %d\n", fds[0], fds[1]);
+				else if (dst == PROC_TRAP)
+					pprintf(__func__, "socketpair() for traphandler at fd %d %d\n", fds[0], fds[1]);
+				else
+					pprintf(__func__, "socketpair() for zzz at fd %d %d\n", fds[0], fds[1]);
+				systemf("fstat -p %jd | grep -e '%d\\* unix' -e '%d\\* unix'", (intmax_t)getpid(), fds[0], fds[1]);
+
 				pa->pp_pipes[dst][proc] = fds[0];
 				pb->pp_pipes[PROC_PARENT][0] = fds[1];
 			}
@@ -276,12 +391,14 @@ proc_accept(struct privsep *ps, int fd, enum privsep_procid dst,
 		    privsep_process, ps->ps_instance + 1,
 		    dst, n + 1);
 #endif
+		pprintf(__func__, "close %d\n", fd);
 		close(fd);
 		return;
 	}
 
 	if (pp->pp_pipes[dst][n] != -1) {
 		log_warnx("%s: duplicated descriptor", __func__);
+		pprintf(__func__, "close %d\n", fd);
 		close(fd);
 		return;
 	} else
@@ -413,21 +530,34 @@ proc_open(struct privsep *ps, int src, int dst)
 	unsigned int		 i, j;
 
 	/* Exchange pipes between process. */
+	// i: always 0
 	for (i = 0; i < ps->ps_instances[src]; i++) {
+		// j: always 0
 		for (j = 0; j < ps->ps_instances[dst]; j++) {
 			/* Don't create sockets for ourself. */
 			if (src == dst && i == j)
 				continue;
 
+			// src           dst
+			// 1(PROC_SNMPE) 2(PROC_TRAP)
 			pa = &ps->ps_pipes[src][i];
 			pb = &ps->ps_pipes[dst][j];
 			if (socketpair(AF_UNIX,
 			    SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
 			    PF_UNSPEC, fds) == -1)
 				fatal("%s: socketpair", __func__);
+			pprintf(__func__, "socketpair() at fd %d %d\n", fds[0], fds[1]);
+			systemf("fstat -p %jd | grep -e '%d\\* unix' -e '%d\\* unix'", (intmax_t)getpid(), fds[0], fds[1]);
 
 			pa->pp_pipes[dst][j] = fds[0];
 			pb->pp_pipes[src][i] = fds[1];
+
+			// ps->ps_pipes
+			//               0(p)                1(s)     2(t)
+			// 0(parent)     -1                    4      6
+			// 1(snmpe)       5->-1(proc_exec)    -1     -1->7(now)
+			// 2(traphander)  7->-1(proc_exec)    -1->8(now)   -1
+
 
 			pf.pf_procid = src;
 			pf.pf_instance = i;
@@ -474,6 +604,7 @@ proc_close(struct privsep *ps)
 			/* Cancel the fd, close and invalidate the fd */
 			event_del(&(ps->ps_ievs[dst][n].ev));
 			imsg_clear(&(ps->ps_ievs[dst][n].ibuf));
+			pprintf(__func__, "close %d\n", pp->pp_pipes[dst][n]);
 			close(pp->pp_pipes[dst][n]);
 			pp->pp_pipes[dst][n] = -1;
 		}
@@ -499,6 +630,7 @@ proc_shutdown(struct privsep_proc *p)
 void
 proc_sig_handler(int sig, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", sig, event, arg);
 	struct privsep_proc	*p = arg;
 
 	switch (sig) {
@@ -607,6 +739,7 @@ proc_run(struct privsep *ps, struct privsep_proc *p,
 void
 proc_dispatch(int fd, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", fd, event, arg);
 	struct imsgev		*iev = arg;
 	struct privsep_proc	*p = iev->proc;
 	struct privsep		*ps = p->p_ps;

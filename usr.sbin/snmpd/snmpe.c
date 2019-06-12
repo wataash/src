@@ -136,6 +136,7 @@ snmpe_shutdown(void)
 		event_del(&so->s_ev);
 		if (so->s_ipproto == IPPROTO_TCP)
 			event_del(&so->s_evt);
+		pprintf(__func__, "close %d\n", so->s_fd);
 		close(so->s_fd);
 	}
 	kr_shutdown();
@@ -207,6 +208,7 @@ snmpe_bind(struct address *addr)
 	return (s);
 
  bad:
+	pprintf(__func__, "close %d\n", s);
 	close(s);
 	return (-1);
 }
@@ -447,6 +449,8 @@ snmpe_parsevarbinds(struct snmp_message *msg)
 					msg->sm_c = ber_add_sequence(NULL);
 					ret = mps_getnextreq(msg, msg->sm_c,
 					    &o);
+					if (ret == 1)
+						printf("%s() %d", __func__, __LINE__);
 					if (ret == 0 || ret == 1)
 						break;
 					ber_free_elements(msg->sm_c);
@@ -521,6 +525,7 @@ snmpe_parsevarbinds(struct snmp_message *msg)
 void
 snmpe_acceptcb(int fd, short type, void *arg)
 {
+	pprintf(__func__, "fd:%d type:%d arg:%p\n", fd, type, arg);
 	struct listen_sock	*so = arg;
 	struct sockaddr_storage ss;
 	socklen_t len = sizeof(ss);
@@ -550,6 +555,7 @@ snmpe_acceptcb(int fd, short type, void *arg)
 	return;
 fail:
 	free(msg);
+	pprintf(__func__, "close %d\n", afd);
 	close(afd);
 	return;
 }
@@ -596,12 +602,14 @@ snmpe_tryparse(int fd, struct snmp_message *msg)
 	return;
  fail:
 	snmp_msgfree(msg);
+	pprintf(__func__, "close %d\n", fd);
 	close(fd);
 }
 
 void
 snmpe_readcb(int fd, short type, void *arg)
 {
+	pprintf(__func__, "fd:%d type:%d arg:%p\n", fd, type, arg);
 	struct snmp_message *msg = arg;
 	ssize_t len;
 
@@ -623,12 +631,14 @@ snmpe_readcb(int fd, short type, void *arg)
 
  fail:
 	snmp_msgfree(msg);
+	pprintf(__func__, "close %d\n", fd);
 	close(fd);
 }
 
 void
 snmpe_writecb(int fd, short type, void *arg)
 {
+	pprintf(__func__, "fd:%d type:%d arg:%p\n", fd, type, arg);
 	struct snmp_stats	*stats = &snmpd_env->sc_stats;
 	struct snmp_message	*msg = arg;
 	struct snmp_message	*nmsg;
@@ -686,6 +696,7 @@ snmpe_writecb(int fd, short type, void *arg)
 	return;
 
  fail:
+	pprintf(__func__, "close %d\n", fd);
 	close(fd);
 	snmp_msgfree(msg);
 }
@@ -693,6 +704,7 @@ snmpe_writecb(int fd, short type, void *arg)
 void
 snmpe_recvmsg(int fd, short sig, void *arg)
 {
+	pprintf(__func__, "fd:%d sig:%d arg:%p\n", fd, sig, arg);
 	struct snmpd		*env = arg;
 	struct snmp_stats	*stats = &env->sc_stats;
 	ssize_t			 len;
@@ -706,6 +718,7 @@ snmpe_recvmsg(int fd, short sig, void *arg)
 	if ((len = recvfromto(fd, msg->sm_data, sizeof(msg->sm_data), 0,
 	    (struct sockaddr *)&msg->sm_ss, &msg->sm_slen,
 	    (struct sockaddr *)&msg->sm_local_ss, &msg->sm_local_slen)) < 1) {
+		pprintf(__func__, "recvfromto() returns <= 0\n");
 		free(msg);
 		return;
 	}
@@ -746,6 +759,7 @@ snmpe_recvmsg(int fd, short sig, void *arg)
 void
 snmpe_dispatchmsg(struct snmp_message *msg)
 {
+	pprintf(__func__, "\n");
 	/* dispatched to subagent */
 	if (snmpe_parsevarbinds(msg) == 1)
 		return;

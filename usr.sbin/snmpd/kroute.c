@@ -44,6 +44,16 @@
 
 #include "snmpd.h"
 
+/**
+ * Kernel Routing Table?
+ * max: krt[krt_size - 1]
+ *
+ * on my environment:
+ *   krt_size is 1 after init
+ *   so only krt[0] is valid
+ *
+ * @see ktable
+ */
 struct ktable		**krt;
 u_int			  krt_size;
 
@@ -51,7 +61,9 @@ struct {
 	struct event		 ks_ev;
 	u_long			 ks_iflastchange;
 	u_long			 ks_nroutes;	/* 4 billions enough? */
+	// routing socket (AF_ROUTE)
 	int			 ks_fd;
+	// ioctl fd
 	int			 ks_ifd;
 	u_short			 ks_nkif;
 } kr_state;
@@ -145,10 +157,12 @@ RB_GENERATE(kroute_tree, kroute_node, entry, kroute_compare)
 RB_PROTOTYPE(kroute6_tree, kroute6_node, entry, kroute6_compare)
 RB_GENERATE(kroute6_tree, kroute6_node, entry, kroute6_compare)
 
+/** kif (kernel if?) tree */
 RB_HEAD(kif_tree, kif_node)		kit;
 RB_PROTOTYPE(kif_tree, kif_node, entry, kif_compare)
 RB_GENERATE(kif_tree, kif_node, entry, kif_compare)
 
+/** ka (kernel arp?) tree  */
 RB_HEAD(ka_tree, kif_addr)		kat;
 RB_PROTOTYPE(ka_tree, kif_addr, node, ka_compare)
 RB_GENERATE(ka_tree, kif_addr, node, ka_compare)
@@ -280,6 +294,13 @@ ktable_free(u_int rtableid)
 	free(kt);
 }
 
+/**
+ * Returns krt[rtableid] or NULL
+ *
+ * on my environment:
+ *   krt_size is 1 after init
+ *   so rtableid is always 0
+ */
 struct ktable *
 ktable_get(u_int rtableid)
 {
@@ -763,6 +784,10 @@ karp_remove(struct kif_node *kn, struct kif_arp *ka)
 	return (0);
 }
 
+/**
+ * (guess) first entry in `arp -a` for ifindex
+ * if ifindex==0 -> use ifindex 1
+ */
 struct kif_arp *
 karp_first(u_short ifindex)
 {
@@ -783,6 +808,37 @@ karp_getaddr(struct sockaddr *sa, u_short ifindex, int next)
 	return (next ? TAILQ_NEXT(ka, entry) : ka);
 }
 
+/**
+ * ifconfig bridge0 create  # index 5
+ * ifconfig bridge0 destroy
+ * ifconfig bridge0 create  # index 6
+ * ifconfig:
+ *   em0:    index 1
+ *   enc0:   index 2
+ *   lo0:    index 3
+ *   pflog0: index 4
+ *   bridge0 index 6
+ * kif_find(0) -> em0 (not NULL!)
+ * kif_find(1) -> em0
+ * kif_find(2) -> enc0
+ * kif_find(3) -> lo0
+ * kif_find(4) -> pflog0
+ * kif_find(5) -> NULL
+ * kif_find(6) -> bridge0
+ * kif_find(7) -> NULL
+ *
+ * callers:
+ *   if_announce
+ *   if_deladder
+ *   if_newaddr
+ *   karp_find
+ *   karp_first
+ *   karp_insert
+ *   karp_remove
+ *   kif_update
+ *   kr_getif
+ *   kr_getnextif
+ */
 struct kif_node *
 kif_find(u_short if_index)
 {
@@ -794,9 +850,47 @@ kif_find(u_short if_index)
 	bzero(&s, sizeof(s));
 	s.k.if_index = if_index;
 
-	return (RB_FIND(kif_tree, &kit, &s));
+	// return (RB_FIND(kif_tree, &kit, &s));
+
+	struct kif_node *ret = RB_FIND(kif_tree, &kit, &s);
+
+	// kit.rbh_root and ret: unrelated?
+	int breakpoint = 0;
+	if (kit.rbh_root == ret)
+		breakpoint = __LINE__;
+	if (kit.rbh_root != ret)
+		breakpoint = __LINE__;
+	if (kit.rbh_root != NULL && ret == kit.rbh_root)
+		breakpoint = __LINE__;
+	if (kit.rbh_root != NULL && ret != kit.rbh_root)
+		breakpoint = __LINE__;
+	(void)breakpoint;
+
+	// check s unchanged
+	if (s.k.if_index != if_index)
+		pprintf(__func__, "s.k.if_index changed: %hu -> %hu", if_index, s.k.if_index);
+	s.k.if_index = 0;
+	for (char *c = (char *)&s; c < (char *)(&s + 1); c++) {
+		if (*c != '\0')
+			pprintf(__func__, "non zero found; s changed\n");
+	}
+
+	return ret;
 }
 
+/**
+ * Wrapper for kif_find()
+ *
+ * kr_getif(1) -> kif_find(1); em0
+ *
+ * callers:
+ *   mib_carpifget
+ *   mib_carpifum
+ *   mib_ifget
+ *   mib_physaddrtable
+ *
+ * @see kif_find
+ */
 struct kif *
 kr_getif(u_short if_index)
 {
@@ -878,6 +972,8 @@ kif_clear(void)
 
 	while ((kif = RB_MIN(kif_tree, &kit)) != NULL)
 		kif_remove(kif);
+	if (kr_state.ks_nkif != 0)
+		fprintf(stderr, "unexpected: %s(): ks_nkif: %u", __func__, kr_state.ks_nkif);
 	kr_state.ks_nkif = 0;
 	kr_state.ks_iflastchange = smi_getticks();
 }
@@ -915,6 +1011,7 @@ kif_update(u_short if_index, int flags, struct if_data *ifd,
 	bzero(&ifr, sizeof(ifr));
 	strlcpy(ifr.ifr_name, kif->k.if_name, sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)&kif->k.if_descr;
+	// ↑?
 	if (ioctl(kr_state.ks_ifd, SIOCGIFDESCR, &ifr) == -1)
 		bzero(&kif->k.if_descr, sizeof(kif->k.if_descr));
 
@@ -1077,13 +1174,35 @@ prefixlen2mask6(u_int8_t prefixlen)
 #define ROUNDUP(a) \
 	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 
+/**
+ * Modifies rti_info
+ */
 void
 get_rtaddrs(int addrs, struct sockaddr *sa, struct sockaddr **rti_info)
 {
+	static const char *const tmp[] = {
+		"RTAX_DST",
+		"RTAX_GATEWAY",
+		"RTAX_NETMASK",
+		"RTAX_GENMASK",
+		"RTAX_IFP",
+		"RTAX_IFA",
+		"RTAX_AUTHOR",
+		"RTAX_BRD",
+		"RTAX_SRC",
+		"RTAX_SRCMASK",
+		"RTAX_LABEL",
+		"RTAX_BFD",
+		"RTAX_DNS",
+		"RTAX_STATIC",
+		"RTAX_SEARCH",
+		"RTAX_MAX",
+	};
 	int	i;
 
 	for (i = 0; i < RTAX_MAX; i++) {
 		if (addrs & (1 << i)) {
+			pprintf(__func__, "rti_info[%d(%s)] = sa\n", i, tmp[i]);
 			rti_info[i] = sa;
 			sa = (struct sockaddr *)((char *)(sa) +
 			    ROUNDUP(sa->sa_len));
@@ -1258,6 +1377,8 @@ fetchifs(u_short if_index)
 int
 fetcharp(struct ktable *kt)
 {
+	pprintf(__func__, "fetcharp\n");
+
 	size_t			 len;
 	int			 mib[7];
 	char			*buf;
@@ -1300,6 +1421,7 @@ fetcharp(struct ktable *kt)
 void
 dispatch_rtmsg(int fd, short event, void *arg)
 {
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", fd, event, arg);
 	char			 buf[RT_BUF_SIZE];
 	ssize_t			 n;
 
@@ -1319,6 +1441,8 @@ dispatch_rtmsg(int fd, short event, void *arg)
 int
 rtmsg_process(char *buf, int len)
 {
+	pprintf(__func__, "------------------------------------------------\n");
+
 	struct ktable		*kt;
 	struct rt_msghdr	*rtm;
 	struct if_msghdr	 ifm;
@@ -1335,6 +1459,128 @@ rtmsg_process(char *buf, int len)
 
 		sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
 		get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
+
+		{
+			struct {
+				int val;
+				const char *type;
+			} pairs_val_type[] = {
+				{RTM_ADD, "RTM_ADD"},
+				{RTM_DELETE, "RTM_DELETE"},
+				{RTM_CHANGE, "RTM_CHANGE"},
+				{RTM_GET, "RTM_GET"},
+				{RTM_LOSING, "RTM_LOSING"},
+				{RTM_REDIRECT, "RTM_REDIRECT"},
+				{RTM_MISS, "RTM_MISS"},
+				{RTM_RESOLVE, "RTM_RESOLVE"},
+				{RTM_NEWADDR, "RTM_NEWADDR"},
+				{RTM_DELADDR, "RTM_DELADDR"},
+				{RTM_IFINFO, "RTM_IFINFO"},
+				{RTM_IFANNOUNCE, "RTM_IFANNOUNCE"},
+				{RTM_DESYNC, "RTM_DESYNC"},
+				{RTM_INVALIDATE, "RTM_INVALIDATE"},
+				{RTM_BFD, "RTM_BFD"},
+				{RTM_PROPOSAL, "RTM_PROPOSAL"},
+				{RTM_CHGADDRATTR, "RTM_CHGADDRATTR"},
+				{RTM_80211INFO, "RTM_80211INFO"},
+			};
+			for (size_t i = 0; i < nitems(pairs_val_type); i++) {
+				int val = pairs_val_type[i].val;
+				const char *type = pairs_val_type[i].type;
+				if (val == rtm->rtm_type) {
+					pprintf(__func__, "rtm_type: %s\n", type);
+					goto break_;
+				}
+			}
+			pprintf(__func__, "rtm_type: ?(0x%x)\n", rtm->rtm_type);
+		}
+break_:
+
+		{
+			struct {
+				int val;
+				const char *type;
+			} pairs_val_type[] = {
+				{RTF_UP,        "UP"},
+				{RTF_GATEWAY,   "GATEWAY"},
+				{RTF_HOST,      "HOST"},
+				{RTF_REJECT,    "REJECT"},
+				{RTF_DYNAMIC,   "DYNAMIC"},
+				{RTF_MODIFIED,  "MODIFIED"},
+				{RTF_DONE,      "DONE"},
+				{RTF_CLONING,   "CLONING"},
+				{RTF_MULTICAST, "MULTICAST"},
+				{RTF_LLINFO,    "LLINFO"},
+				{RTF_STATIC,    "STATIC"},
+				{RTF_BLACKHOLE, "BLACKHOLE"},
+				{RTF_PROTO3,    "PROTO3"},
+				{RTF_ANNOUNCE,  "ANNOUNCE"},
+				{RTF_PROTO1,    "PROTO1"},
+				{RTF_CLONED,    "CLONED"},
+				{RTF_CACHED,    "CACHED"},
+				{RTF_MPATH,     "MPATH"},
+				{RTF_MPLS,      "MPLS"},
+				{RTF_LOCAL,     "LOCAL"},
+				{RTF_BROADCAST, "BROADCAST"},
+				{RTF_CONNECTED, "CONNECTED"},
+				{RTF_BFD,       "BFD"},
+			};
+			pprintf(__func__, "rtm_flags: 0x%x : RTF_... ", rtm->rtm_flags);
+			for (size_t i = 0; i < nitems(pairs_val_type); i++) {
+				int val = pairs_val_type[i].val;
+				const char *type = pairs_val_type[i].type;
+				if (rtm->rtm_flags & val) {
+					printf("%s ", type);
+				}
+			}
+			printf("\n");
+		}
+
+		{
+			struct {
+				int val;
+				const char *type;
+			} pairs_val_type[] = {
+				{0, "DST"},
+				{1, "GATEWAY"},
+				{2, "NETMASK"},
+				{3, "GENMASK"},
+				{4, "IFP"},
+				{5, "IFA"},
+				{6, "AUTHOR"},
+				{7, "BRD"},
+				{8, "SRC"},
+				{9, "SRCMASK"},
+				{10, "LABEL"},
+				{11, "BFD"},
+				{12, "DNS"},
+				{13, "STATIC"},
+				{14, "SEARCH"},
+				{15, "MAX"},
+			};
+			pprintf(__func__, "rtm_addrs: 0x%x : RTA_ ... ", rtm->rtm_addrs);
+			for (size_t i = 0; i < nitems(pairs_val_type); i++) {
+				int val = pairs_val_type[i].val;
+				const char *type = pairs_val_type[i].type;
+				if (rtm->rtm_addrs & val) {
+					printf("%s ", type);
+				}
+			}
+			printf("\n");
+		}
+
+		// ifconfig bridge0 rdomain 2
+		//   RTM_GET RTM_ANNOUNCE
+		// arp -s 1.2.3.4 12:34:56:ab:cd:ef
+		//   RTM_GET RTM_ADD
+		// arp -d 10.0.2.2 (gw)
+		//   RTM_DELETE RTM_RESOLVE
+		// arp -d 10.0.2.3 (dns)
+		//   RTM_GET RTM_DELETE
+		// arp -d 10.0.2.15 (self)
+		//   RTM_GET
+		// ping 10.0.2.99
+		//   RTM_ADD
 
 		switch (rtm->rtm_type) {
 		case RTM_ADD:
@@ -1384,6 +1630,7 @@ rtmsg_process(char *buf, int len)
 			ktable_init();
 			break;
 		default:
+			pprintf(__func__, "ignore RTM_?\n");
 			/* ignore for now */
 			break;
 		}

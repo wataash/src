@@ -63,6 +63,7 @@ smi_getticks(void)
 	struct timeval	 now, run;
 	u_long		 ticks;
 
+	// 時間逆行で不都合？
 	gettimeofday(&now, NULL);
 	if (timercmp(&now, &snmpd_env->sc_starttime, <=))
 		return (0);
@@ -74,6 +75,14 @@ smi_getticks(void)
 	return (ticks);
 }
 
+/**
+ * sets .0 trimmed len
+ *
+ * example:
+ *   o->bo_id  : 1.2.3.0
+ *   o->bo_len : 4
+ *   sets: o->bo_len = 3
+ */
 void
 smi_oidlen(struct ber_oid *o)
 {
@@ -198,6 +207,19 @@ smi_insert(struct oid *oid)
 	return (0);
 }
 
+/**
+ * @param oids
+ *   - mib.c mib_tree == mib.h MIB_TREE : insert to RB tree
+ *   - mib.c base_mib : update RB tree
+ *                      (o_flags, o_get, o_set, o_table, o_val, o_data)
+ *   - mib.c usm_mib
+ *   - mib.c hr_mib
+ *   - mib.c if_mib
+ *   - mib.c ip_mib
+ *   - mib.c ipf_mib
+ *   - mib.c bridge_mib
+ *   - mib.c diskio_mib
+ */
 void
 smi_mibtree(struct oid *oids)
 {
@@ -222,6 +244,8 @@ smi_mibtree(struct oid *oids)
 		decl->o_set = oid->o_set;
 		decl->o_table = oid->o_table;
 		decl->o_val = oid->o_val;
+		if (decl->o_data != NULL)
+			fatalx("smi_mibtree: unreachable");
 		decl->o_data = oid->o_data;
 	}
 }
@@ -295,6 +319,8 @@ smi_debug_elements(struct ber_element *root)
 	static int	 indent = 0;
 	char		*value;
 	int		 constructed;
+
+	return;
 
 	/* calculate lengths */
 	ber_calc_len(root);

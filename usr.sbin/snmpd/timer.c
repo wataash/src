@@ -59,6 +59,8 @@ timer_cpu(int fd, short event, void *arg)
 	size_t		 len;
 	int64_t		*cptime2;
 
+	pprintf(__func__, "\x1b[35m  fd:%d event:%d arg:%p \x1b[0m \n", fd, event, arg);
+
 	len = CPUSTATES * sizeof(int64_t);
 	for (n = 0; n < snmpd_env->sc_ncpu; n++) {
 		mib[2] = n;

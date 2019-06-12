@@ -100,6 +100,7 @@ snmp_agentx_open(const char *path, char *descr, struct snmp_oid *oid)
 
 	return (h);
  fail:
+	pprintf(__func__, "close %d\n", s);
 	close(s);
 	return (NULL);
 }
@@ -154,8 +155,10 @@ snmp_agentx_free(struct agentx_handle *h)
 {
 	struct agentx_pdu *pdu;
 
-	if (h->fd != -1)
+	if (h->fd != -1) {
+		pprintf(__func__, "close %d\n", h->fd);
 		close(h->fd);
+	}
 
 	while ((pdu = TAILQ_FIRST(&h->w))) {
 		TAILQ_REMOVE(&h->w, pdu, entry);
@@ -519,6 +522,7 @@ snmp_agentx_open_pdu(struct agentx_handle *h, char *descr,
 
 	if (oid == NULL) {
 		bzero(&nulloid, sizeof(nulloid));
+		// dangerous
 		oid = &nulloid;
 	}
 
@@ -760,6 +764,7 @@ snmp_agentx_octetstring(struct agentx_pdu *pdu, char *str, int len)
 
 	padding = ((len + 3) & ~0x03) - len;
 
+	// l = len + padding ?
 	l = len;
 	if (snmp_agentx_int(pdu, &l) == -1 ||
 	    snmp_agentx_raw(pdu, str, len) == -1 ||
