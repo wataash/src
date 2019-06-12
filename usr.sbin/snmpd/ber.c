@@ -55,6 +55,12 @@ static ssize_t	ber_read(struct ber *ber, void *buf, size_t len);
 #define DPRINTF(...)	do { } while (0)
 #endif
 
+/**
+ * calloc elm (should be freed by ber_free_elements())
+ * @return
+ *   elm->be_type     = encoding
+ *   elm->be_encoding = encoding
+ */
 struct ber_element *
 ber_get_element(unsigned int encoding)
 {
@@ -78,6 +84,9 @@ ber_set_header(struct ber_element *elm, int class, unsigned int type)
 	elm->be_type = type;
 }
 
+/**
+ * ?
+ */
 void
 ber_link_elements(struct ber_element *prev, struct ber_element *elm)
 {
@@ -178,6 +187,14 @@ ber_add_enumerated(struct ber_element *prev, long long val)
 	return elm;
 }
 
+/**
+ * @param prev prev->be_next = elm
+ * @return
+ *   elm->be_type       = BER_TYPE_INTEGER
+ *   elm->be_encoding   = BER_TYPE_INTEGER
+ *   elm->be_len        = ?
+ *   elm->be_numeric    = val
+ */
 struct ber_element *
 ber_add_integer(struct ber_element *prev, long long val)
 {
@@ -253,12 +270,26 @@ ber_get_boolean(struct ber_element *elm, int *b)
 	return 0;
 }
 
+/**
+ * ber_add_nstring(prev, string, strlen(string)
+ */
 struct ber_element *
 ber_add_string(struct ber_element *prev, const char *string)
 {
 	return ber_add_nstring(prev, string, strlen(string));
 }
 
+/**
+ * calloc elm (should be freed by ber_free_elements())
+ * @param prev ?
+ * @param len length of string0
+ * @return
+ *   elm->be_type     = BER_TYPE_OCTETSTRING
+ *   elm->be_encoding = BER_TYPE_OCTETSTRING
+ *   elm->be_val      = string0
+ *   elm->be_len      = len
+ *   elm->be_free     = 1
+ */
 struct ber_element *
 ber_add_nstring(struct ber_element *prev, const char *string0, size_t len)
 {
@@ -403,6 +434,10 @@ ber_get_eoc(struct ber_element *elm)
 	return 0;
 }
 
+/**
+ * Serealize o into buf.
+ * @param len if 0, not write to buf
+ */
 size_t
 ber_oid2ber(struct ber_oid *o, u_int8_t *buf, size_t len)
 {
@@ -478,6 +513,17 @@ ber_oid_cmp(struct ber_oid *a, struct ber_oid *b)
 	return (0);
 }
 
+/**
+ * calloc elm (should be freed by ber_free_elements())
+ * @param ~~prev prev->next = elm~~ incorrect. see ber_link_elements
+ * @return
+ *   NULL if falied
+ *   elm->be_type     = BER_TYPE_OBJECT
+ *   elm->be_encoding = BER_TYPE_OBJECT
+ *   elm->be_val      = ber_oid2ber(o, buf, len)
+ *   elm->be_len      = len
+ *   elm->be_free     = 1
+ */
 struct ber_element *
 ber_add_oid(struct ber_element *prev, struct ber_oid *o)
 {
@@ -510,6 +556,9 @@ ber_add_oid(struct ber_element *prev, struct ber_oid *o)
 	return (NULL);
 }
 
+/**
+ * same as ber_add_oid(), except that o->bo_n passed as n
+ */
 struct ber_element *
 ber_add_noid(struct ber_element *prev, struct ber_oid *o, int n)
 {
@@ -930,6 +979,7 @@ ber_free_elements(struct ber_element *root)
 	free(root);
 }
 
+/** Update root->be_len */
 size_t
 ber_calc_len(struct ber_element *root)
 {

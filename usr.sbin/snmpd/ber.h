@@ -25,17 +25,38 @@ struct ber_octetstring {
 	const void		*ostr_val;
 };
 
+/**
+ * Basic Encoding Rules 構造
+ * DPRINTF() (-DDEBUG) の出力とパケットダンプを見比べれば理解できるはず…
+ * 参考: http://www.geocities.co.jp/SiliconValley-SanJose/3377/asn1Body.html
+ */
 struct ber_element {
+	/**
+	 * SEQUENCE中のnext。SEQUENCE外ではNULL。
+	 * パケットの最後はempty element (ber_get_element(BER_TYPE_EOC))
+	 * となる。（DPRINTF()の出力参照）
+	 */
 	struct ber_element	*be_next;
+	/**
+	 * - BER_CLASS_UNIVERSAL   の場合 be_type に一致
+	 * - BER_CLASS_APPLICATION の場合 SNMP_T_*
+	 * - BER_CLASS_CONTEXT     の場合 SNMP_C_*
+	 */
 	unsigned int		 be_type;
+	/** タグフィールド BER_TYPE_* */
 	unsigned int		 be_encoding;
+	/** 値の長さフィールド */
 	size_t			 be_len;
+	/** TOOD: ? */
 	off_t			 be_offs;
+	/** be_val が free()ed in ber_free_elements() */
 	int			 be_free;
+	/** BER_CLASS_* */
 	u_int8_t		 be_class;
 	void			(*be_cb)(void *, size_t);
 	void			*be_cbarg;
 	union {
+		/** be_encoding == BER_TYPE_{SEQUENCE,SET} の場合にnon-NULL? */
 		struct ber_element	*bv_sub;
 		void			*bv_val;
 		long long		 bv_numeric;
@@ -67,7 +88,15 @@ struct ber {
 #define BER_TYPE_NULL		5
 #define BER_TYPE_OBJECT		6
 #define BER_TYPE_ENUMERATED	10
+/**
+ * CCS10000 (0x10, 16)
+ * 汎用Class (BER_CLASS_UNIVERSAL)、Structured type (constructed, 0x1)
+ * なのでパケットでは：
+ * 00110000 (0x32, 50)
+ * http://www.geocities.co.jp/SiliconValley-SanJose/3377/asn1Body.html
+ */
 #define BER_TYPE_SEQUENCE	16
+/** BER_TYPE_SEQUENCE と同様にパケットでは 00110001 (0x33, 51) */
 #define BER_TYPE_SET		17
 
 /* ber classes */
