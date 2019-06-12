@@ -15,4 +15,10 @@ CFLAGS+=	-Wshadow -Wpointer-arith -Wcast-qual
 CFLAGS+=	-Wsign-compare
 YFLAGS=
 
+CFLAGS+=	-O0 -ggdb3  # or: make COPTS='-O0 -ggdb3'
+CFLAGS+=	-fstack-protector-strong
+CPPFLAGS+=	-D_FORTIFY_SOURCE=2
+CPPLLAGS+=	-DDEBUG=2
+CPPFLAGS+=	-DYYDEBUG=1
+
 .include <bsd.prog.mk>

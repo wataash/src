@@ -1,0 +1,10 @@
+BasedOnStyle: LLVM
+
+AlwaysBreakAfterDefinitionReturnType: All    # void<NL>func(void)<NL>{
+BreakBeforeBraces: Custom                    # use BraceWrapping
+BraceWrapping:                               #
+  AfterFunction: true                        # void<NL>func(void)<NL>{
+ContinuationIndentWidth: 4                   # note
+ConstructorInitializerIndentWidth: 99        # ?
+IndentWidth: 8                               #
+UseTab: ForContinuationAndIndentation        # note

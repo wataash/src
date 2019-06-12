@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CLionExternalBuildManager">
+    <target id="f57b20d4-7e54-492b-9de8-7a288ae236ed" name="custombt_rsync_build_kill" projectName="snmpd">
+      <configuration id="4242a7f5-26e2-440d-a891-4df92875d9b3" name="custombt_rsync_build_kill" toolchainName="sshgdb_ob">
+        <build type="TOOL">
+          <tool actionId="Tool_External Tools_rsync_build_kill" />
+        </build>
+      </configuration>
+    </target>
+    <target id="cf909be2-bbaa-4397-b0ac-7714322533a8" name="custombt_rsync_build" projectName="snmpd">
+      <configuration id="16203a19-fccc-418d-87a4-b210eb8ec34a" name="custombt_rsync_build" toolchainName="sshgdb_ob">
+        <build type="TOOL">
+          <tool actionId="Tool_External Tools_rsync_build" />
+        </build>
+      </configuration>
+    </target>
+  </component>
+</project>

@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="custombt0 snmpe" type="CLionExternalRunConfiguration" factoryName="Application" PROGRAM_PARAMS="-P snmpe -I 0 -dddddvvvvv" PASS_PARENT_ENVS_2="true" PROJECT_NAME="snmpd" TARGET_NAME="custombt_rsync_build_kill" CONFIG_NAME="custombt_rsync_build_kill" RUN_PATH="$PROJECT_DIR$/snmpd">
+    <method v="2">
+      <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+    </method>
+  </configuration>
+</component>
